@@ -184,7 +184,7 @@ class AutoTable:
                 # 最好还是提供一些上下文。
                 if len(text) > 0:
                     markdown_lines.append(f"- {text}")
-        
+
         markdown_text = "\n".join(markdown_lines)
         return markdown_text, anchor_map, id_to_text_map
 

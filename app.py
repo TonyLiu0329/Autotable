@@ -33,6 +33,34 @@ def setup_logging():
         console_handler.setLevel(logging.INFO)
         root_logger.addHandler(console_handler)
 
+def save_to_history(source_path, target_filename, history_dir="history", max_records=20):
+    """保存文件到历史记录，并自动清理旧记录"""
+    if not os.path.exists(history_dir):
+        os.makedirs(history_dir)
+    
+    # 复制新文件
+    target_path = os.path.join(history_dir, target_filename)
+    shutil.copy(source_path, target_path)
+    
+    # 获取所有 .docx 文件
+    files = [f for f in os.listdir(history_dir) if f.endswith(".docx")]
+    
+    # 如果超过限制，删除最老的
+    if len(files) > max_records:
+        # 按修改时间排序，最老的在前
+        files.sort(key=lambda x: os.path.getmtime(os.path.join(history_dir, x)))
+        
+        # 计算需要删除的数量
+        num_to_delete = len(files) - max_records
+        
+        for i in range(num_to_delete):
+            file_to_delete = files[i]
+            try:
+                os.remove(os.path.join(history_dir, file_to_delete))
+                logging.info(f"Deleted old history file: {file_to_delete}")
+            except Exception as e:
+                logging.error(f"Failed to delete old history file {file_to_delete}: {e}")
+
 def load_css():
     st.markdown("""
         <style>
@@ -251,10 +279,7 @@ def main():
                                         result_path = os.path.join(temp_output_dir, result_file)
                                         
                                         # 保存到历史记录
-                                        history_dir = "history"
-                                        if not os.path.exists(history_dir):
-                                            os.makedirs(history_dir)
-                                        shutil.copy(result_path, os.path.join(history_dir, result_file))
+                                        save_to_history(result_path, result_file)
                                         
                                         # 读取文件用于下载
                                         with open(result_path, "rb") as f:
@@ -300,10 +325,7 @@ def main():
                                     result_path = os.path.join(temp_output_dir, result_file)
                                     
                                     # 保存到历史记录
-                                    history_dir = "history"
-                                    if not os.path.exists(history_dir):
-                                        os.makedirs(history_dir)
-                                    shutil.copy(result_path, os.path.join(history_dir, result_file))
+                                    save_to_history(result_path, result_file)
 
                                     with open(result_path, "rb") as f:
                                         file_data = f.read()
