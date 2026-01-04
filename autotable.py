@@ -275,10 +275,24 @@ class AutoTable:
         markdown_text = "\n".join(markdown_lines)
         return markdown_text, anchor_map, id_to_text_map
 
-    def analyze_tables_with_llm(self, table_markdown, knowledge_context, id_to_text_map):
+    def analyze_tables_with_llm(self, table_markdown, knowledge_context, id_to_text_map, used_contexts=None):
         # 动态判断知识库格式，生成不同的 Prompt 描述
         data_format_desc = "扁平化的 JSON 键值对（Key-Value）" if isinstance(knowledge_context, dict) else "按 Sheet（来源）分组的二维数组（矩阵）格式"
         
+        used_context_desc = ""
+        if used_contexts and len(used_contexts) > 0:
+            used_context_desc = f"""
+        **上下文去重约束（重要）**：
+        当前文档中包含多个结构相似的表格，用于填写不同实体（人员/项目）的信息。
+        以下实体标识（如姓名、项目名）**已被前面的表格使用过**：
+        {json.dumps(used_contexts, ensure_ascii=False)}
+        
+        **请务必从知识库中选择一个【未使用过】的新实体数据进行填充。**
+        - 如果知识库是人员列表，请选择下一个不同的人员。
+        - 如果知识库是项目列表，请选择下一个不同的项目。
+        - 如果确实没有更多新数据，才允许重复。
+        """
+
         prompt = f"""
         请分析以下带有锚点（格式如 {{{{ID_XXX}}}}）的文档内容（表格或段落），并结合提供的知识库数据，将正确的值填入对应的锚点。
         
@@ -290,6 +304,7 @@ class AutoTable:
         
         锚点对应的原始文本（参考用，可能包含提示信息）：
         {json.dumps(id_to_text_map, ensure_ascii=False)}
+        {used_context_desc}
         
         **核心原则：严格基于知识库**
         1. **绝对禁止编造数据**：你只能使用“知识库数据”中显式提供的信息。
@@ -333,6 +348,7 @@ class AutoTable:
         
         返回 JSON 格式：
         {{
+            "__identity__": "这里填入你本次使用的实体唯一标识（如姓名：张三），用于后续去重",
             "{{{{ID_001}}}}": "填入的值1",
             "{{{{ID_002}}}}": "",
             ...
@@ -467,6 +483,7 @@ class AutoTable:
             return False
         
         filled_count = 0
+        used_identities = [] # 全局追踪已使用的实体标识
         
         # --- 1. 处理正文段落 ---
         logger.info("正在处理正文段落...")
@@ -474,7 +491,13 @@ class AutoTable:
         
         if para_anchor_map:
             logger.info(f"发现 {len(para_anchor_map)} 个段落填空位，正在请求 LLM 分析...")
-            fill_map = self.analyze_tables_with_llm(para_markdown, self.knowledge_dict, para_id_to_text_map)
+            fill_map = self.analyze_tables_with_llm(para_markdown, self.knowledge_dict, para_id_to_text_map, used_contexts=used_identities)
+            
+            # 提取并记录本次使用的实体标识
+            identity = fill_map.pop("__identity__", None)
+            if identity:
+                used_identities.append(identity)
+                logger.info(f"正文段落使用了实体: {identity}")
             
             for anchor_id, value in fill_map.items():
                 if anchor_id in para_anchor_map:
@@ -528,8 +551,14 @@ class AutoTable:
                 continue
 
             # 第二阶段：LLM 分析并直接返回填充映射
-            # 将知识库数据作为上下文传给 LLM
-            fill_map = self.analyze_tables_with_llm(table_markdown, self.knowledge_dict, id_to_text_map)
+            # 将知识库数据作为上下文传给 LLM，并传入已使用的实体列表
+            fill_map = self.analyze_tables_with_llm(table_markdown, self.knowledge_dict, id_to_text_map, used_contexts=used_identities)
+            
+            # 提取并记录本次使用的实体标识
+            identity = fill_map.pop("__identity__", None)
+            if identity:
+                used_identities.append(identity)
+                logger.info(f"表格 {table_idx + 1} 使用了实体: {identity}")
             
             for anchor_id, value in fill_map.items():
                 if anchor_id in anchor_map:
