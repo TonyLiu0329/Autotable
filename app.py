@@ -100,7 +100,7 @@ def main():
     load_css()
     
     # 顶部标题区
-    st.title("🤖 智能填表助手")
+    st.title("智能填表助手")
     st.markdown("""
     <div style='text-align: center; color: #666; margin-bottom: 30px;'>
         基于大语言模型的自动化文档填充工具，支持 Word/Excel 智能数据提取与回填

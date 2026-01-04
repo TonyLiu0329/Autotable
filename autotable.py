@@ -94,6 +94,11 @@ class AutoTable:
         if not clean_text:
             return True
             
+        # 负向规则：排除明显的表头/Label（防止误判）
+        # 1. "第( )完成人"、"第( )完成单位" 类型的表头
+        if re.match(r'^第\s*[（(]\s*[）)]\s*(?:完成人|作者|完成单位|单位|起草人)', clean_text):
+            return False
+            
         if set(clean_text).issubset(set(" _()（）")):
             return True
         
@@ -112,7 +117,33 @@ class AutoTable:
         # 启发式规则：以冒号结尾的 Prompt
         elif re.search(r'[:：]\s*$', clean_text):
             return True
+        # 针对大表格的长文本Prompt（如 "1. 成果简介..."）
+        # 特征：以数字序号开头，且长度超过一定阈值，暗示这是一个问题描述而非简单标题
+        elif re.match(r'^\d+[.、\s]', clean_text) and len(clean_text) > 5:
+            return True
             
+        return False
+
+    def _has_visual_placeholder(self, element):
+        """
+        检查段落或单元格是否包含“视觉占位符”（带下划线的空白区域）。
+        """
+        paragraphs = []
+        if hasattr(element, 'paragraphs'):
+            paragraphs = element.paragraphs
+        else:
+            paragraphs = [element] # Assume it's a paragraph
+            
+        for para in paragraphs:
+            for run in para.runs:
+                # 检查是否有下划线
+                is_underlined = run.underline is not None and run.underline is not False
+                # 检查内容是否主要为空白
+                text = run.text
+                is_blank = all(c in ' \t\u3000\u00A0' for c in text)
+                
+                if is_underlined and is_blank and len(text) >= 2:
+                    return True
         return False
 
     def _preprocess_paragraphs(self, paragraphs):
@@ -128,7 +159,15 @@ class AutoTable:
         
         for idx, para in enumerate(paragraphs):
             text = para.text.strip()
-            if self._is_potential_slot(text):
+            
+            # 检查是否包含视觉占位符（如下划线空格）
+            has_visual_slot = self._has_visual_placeholder(para)
+            
+            # 修复：跳过空段落，除非它包含视觉占位符
+            if not text and not has_visual_slot:
+                continue
+                
+            if self._is_potential_slot(text) or has_visual_slot:
                 anchor_id = f"{{{{ID_{anchor_counter:03d}}}}}"
                 anchor_map[anchor_id] = idx
                 id_to_text_map[anchor_id] = f"原内容: '{text}'"
@@ -136,7 +175,8 @@ class AutoTable:
                 # 在Markdown中展示
                 # 尝试更智能的展示：如果段落很短，直接展示ID；如果长，展示部分上下文？
                 # 暂时简单处理：直接用 ID 替换原文本展示给 LLM
-                markdown_lines.append(f"- {anchor_id} (原: {text})")
+                display_text = text if text else "[下划线填空区]"
+                markdown_lines.append(f"- {anchor_id} (原: {display_text})")
                 anchor_counter += 1
             else:
                 # 如果不是填空位，但也包含在文档中，是否给LLM看？
@@ -184,8 +224,9 @@ class AutoTable:
 
                 # 判断是否是填空位
                 is_potential_slot = self._is_potential_slot(cell_text)
+                has_visual_slot = self._has_visual_placeholder(cell)
                 
-                if is_potential_slot:
+                if is_potential_slot or has_visual_slot:
                     anchor_id = f"{{{{ID_{anchor_counter:03d}}}}}"
                     anchor_map[anchor_id] = (row_idx, col_idx)
                     
@@ -250,6 +291,10 @@ class AutoTable:
         锚点对应的原始文本（参考用，可能包含提示信息）：
         {json.dumps(id_to_text_map, ensure_ascii=False)}
         
+        **核心原则：严格基于知识库**
+        1. **绝对禁止编造数据**：你只能使用“知识库数据”中显式提供的信息。
+        3. **禁止推测**：不要根据常识或上下文去猜测缺失的信息（例如：不要自己编造邮编、电话、日期，也不要推测上级单位）。原文没有就是没有。
+
         请仔细思考字段的对应关系。
         注意：知识库数据可能为以下两种格式之一：
         1. 按 Sheet（来源）分组的二维数组（矩阵）格式。
@@ -263,19 +308,22 @@ class AutoTable:
         1. **多键合并与分发**：
            - **合并**：如果表格中只有一个对应字段的单元格，但知识库中有多个相关键（如 "奖项_1", "奖项_2"），请将它们合并为一个完整段落（如 "1. A奖；2. B奖"）。
            - **分发**：如果表格中针对同一属性（如“爱好”）预留了**多个独立**的单元格（即多个锚点），且知识库中有对应的多条数据，请将数据**分散填入**不同的锚点，不要重复。
-              - 例如：表格“爱好”下有 `{{ID_001}}` 和 `{{ID_002}}`，知识库有 `爱好_1: A`, `爱好_2: B`。
-              - 正确：`"{{ID_001}}": "A"`, `"{{ID_002}}": "B"`
-              - 错误：`"{{ID_001}}": "A, B"`, `"{{ID_002}}": "A, B"`
+              - 例如：表格“爱好”下有 `{{{{ID_001}}}}` 和 `{{{{ID_002}}}}`，知识库有 `爱好_1: A`, `爱好_2: B`。
+              - 正确：`"{{{{ID_001}}}}": "A"`, `"{{{{ID_002}}}}": "B"`
+              - 错误：`"{{{{ID_001}}}}": "A, B"`, `"{{{{ID_002}}}}": "A, B"`
               - **注意**：如果数据条数少于单元格数（如只有 `爱好_1: A`），请只填入第一个锚点，其余锚点**不要**在返回的JSON中出现（即留空）。
         2. **复杂文本字段**：如“现从事工作及专长”、“何时何地受何奖励”。这些内容可能较长，包含多行，请务必提取完整。
         3. **基础信息字段**：如“工作单位”、“电子信箱”、“通讯地址”。这些信息可能散落在不同位置，请仔细查找。
-        4. **格式处理**：如果源数据中包含换行符（\n），请根据目标表格的语境合理保留或替换为逗号/空格。
+        4. **格式处理**：如果源数据中包含换行符（\\n），请根据目标表格的语境合理保留或替换为逗号/空格。
+        5. **问答式填充**：
+           - 如果锚点对应的“原始文本”是一个问题或指令（例如 "1. 成果简介..."），请**只返回该问题的答案内容**，不要重复问题本身。程序会自动将答案追加在问题下方。
 
         如果一个字段在多个地方出现，请优先选择最匹配上下文的值。
         
         **禁止行为**：
         - 严禁在表格末尾或其他空位自动生成“总结”、“备注”或“额外说明”，除非表格中有明确的“备注”或“总结”标签指示。
         - 如果锚点没有明确的上下文指示（Label），且无法确定其对应关系，请保持为空，不要强行填入剩余的知识库信息。
+        - **再次强调**：知识库中不存在的信息，填入值必须为空字符串。
 
         重要：请返回**完整**的填入内容。
         如果原始文本是占位符（如 "____"），直接返回填入值。
@@ -286,7 +334,7 @@ class AutoTable:
         返回 JSON 格式：
         {{
             "{{{{ID_001}}}}": "填入的值1",
-            "{{{{ID_002}}}}": "填入的值2",
+            "{{{{ID_002}}}}": "",
             ...
         }}
         请确保只返回JSON格式数据，不要包含其他内容。
@@ -315,6 +363,104 @@ class AutoTable:
                 return json_match.group(1)
             raise ValueError("未找到有效JSON内容")
 
+    def _smart_fill_paragraph(self, para, value):
+        """
+        尝试智能填充：如果段落包含下划线/空格占位符，则只替换占位符部分，并保留下划线格式。
+        返回 True 表示已处理，False 表示未匹配到占位符，需调用方回退到默认逻辑。
+        """
+        runs = para.runs
+        placeholder_idx = -1
+        
+        # 1. 寻找段落末尾的占位符 Run
+        # 占位符特征：有下划线，且内容主要是空格、下划线、制表符
+        for i, run in enumerate(runs):
+            text = run.text
+            is_underlined = run.underline is not None and run.underline is not False
+            is_placeholder_chars = all(c in ' _\t\u3000\u00A0' for c in text)
+            
+            # 必须有一定的长度（避免误判单个空格），或者是纯下划线
+            if is_underlined and (len(text) >= 1 and is_placeholder_chars):
+                # 进一步检查：如果是空格，必须是下划线的空格。
+                # 这里假设 run.underline 已经过滤了无下划线的情况
+                placeholder_idx = i
+                break
+        
+        if placeholder_idx == -1:
+            return False
+
+        # 2. 提取 Label 和 Value
+        # Label 是占位符之前的所有文本
+        label_text = "".join([r.text for r in runs[:placeholder_idx]])
+        
+        # 归一化处理以进行模糊匹配
+        import re
+        label_clean = re.sub(r'\s+', '', label_text)
+        value_str = str(value)
+        value_clean = re.sub(r'\s+', '', value_str)
+        
+        fill_content = ""
+        
+        # 尝试从 value_str 中剥离 label
+        # 情况A: value_str 包含 label (例如 "姓名: 张三")
+        # 我们需要在 value_str 中找到 label_clean 的结束位置
+        
+        # 简单的字符串包含检查
+        if label_clean and label_clean in value_clean:
+            # 找到 label 在 value 中的位置
+            # 这比较难精确对应到 value_str 的索引，因为空格差异。
+            # 采用字符逐个匹配法
+            val_ptr = 0
+            lbl_ptr = 0
+            match_end_idx = 0
+            
+            while val_ptr < len(value_str) and lbl_ptr < len(label_clean):
+                if value_str[val_ptr].isspace():
+                    val_ptr += 1
+                    continue
+                
+                if value_str[val_ptr] == label_clean[lbl_ptr]:
+                    val_ptr += 1
+                    lbl_ptr += 1
+                    match_end_idx = val_ptr
+                else:
+                    break
+            
+            if lbl_ptr == len(label_clean):
+                fill_content = value_str[match_end_idx:].strip()
+            else:
+                # 匹配失败，可能 LLM 修改了 Label
+                # 这种情况下，为了安全，我们假设整个 value_str 都是内容？
+                # 或者回退到 False?
+                # 如果回退，会覆盖 Label。如果填入，会重复 Label。
+                # 优先保护 Label 不被覆盖。
+                return False
+        else:
+            # 情况B: value_str 不包含 label (例如 LLM 只返回了 "张三")
+            # 直接把 value_str 当作填充内容
+            fill_content = value_str.strip()
+
+        # 3. 执行填充
+        # 更新占位符 Run
+        target_run = runs[placeholder_idx]
+        # 在内容前后加空格以保持美观（可选，视模板而定，这里加一个前导空格防止紧贴）
+        # 只有当 fill_content 不为空时才填充，否则保持原样（或者清空？）
+        # 用户通常希望填入内容。
+        target_run.text = " " + fill_content + " " 
+        target_run.underline = True # 强制下划线
+        
+        # 清除后续的占位符 Run (防止原占位符很长，被分成了多段)
+        for i in range(placeholder_idx + 1, len(runs)):
+            r = runs[i]
+            is_underlined = r.underline is not None and r.underline is not False
+            is_placeholder_chars = all(c in ' _\t\u3000\u00A0' for c in r.text)
+            if is_underlined and is_placeholder_chars:
+                r.text = ""
+            else:
+                # 遇到非占位符（如后面的括号说明），停止清除
+                break
+                
+        return True
+
     def fill_document(self):
         if not self.doc or self.knowledge_dict is None:
             logger.error("文档或知识库未正确初始化")
@@ -336,11 +482,30 @@ class AutoTable:
                         idx = para_anchor_map[anchor_id]
                         para = self.doc.paragraphs[idx]
                         
-                        # 简单替换：全段替换
-                        # 注意：这会丢失段落内的部分格式（如加粗），但保留段落整体样式
-                        style = para.style
-                        para.text = str(value)
-                        para.style = style
+                        # 智能填充逻辑
+                        original_text = para.text.strip()
+                        clean_val = str(value).strip()
+
+                        # 优先尝试智能下划线填充
+                        if self._smart_fill_paragraph(para, clean_val):
+                            filled_count += 1
+                            logger.debug(f"段落锚点 {anchor_id} 采用下划线保留模式填充")
+                            continue
+                        
+                        # 检查是否是 "Label: " 形式的纯标签段落（无下划线占位符）
+                        # 如果是，且 LLM 返回的值没有包含 Label，则采用追加模式，防止覆盖标签
+                        is_pure_label = re.search(r'[:：]\s*$', original_text)
+                        
+                        if is_pure_label and not clean_val.startswith(original_text[:min(5, len(original_text))]):
+                             # 追加模式：保留原标签，追加内容
+                             para.add_run(f" {clean_val}")
+                             logger.debug(f"段落锚点 {anchor_id} 采用追加模式填充")
+                        else:
+                            # 覆盖模式：全段替换
+                            # 注意：这会丢失段落内的部分格式（如加粗），但保留段落整体样式
+                            style = para.style
+                            para.text = clean_val
+                            para.style = style
                         
                         filled_count += 1
                         logger.debug(f"段落锚点 {anchor_id} 已填充值: {value}")
@@ -380,9 +545,11 @@ class AutoTable:
                         # 识别指令性表头特征：
                         # 1. 以数字开头 (1. / 1、 / 1 )
                         # 2. 包含字数限制说明 (不超过...字)
+                        # 3. 新增：基于长度和数字开头的宽松匹配，与 _is_potential_slot 保持一致
                         if len(original_text) > 0 and (
                             re.match(r'^\d+(\.\d+)*[、. ]', original_text) or 
-                            re.search(r'[（(].*?不超过.*?字.*?[)）]', original_text)
+                            re.search(r'[（(].*?不超过.*?字.*?[)）]', original_text) or
+                            (re.match(r'^\d+[.、\s]', original_text) and len(original_text) > 5)
                         ):
                             # 进一步检查：如果 LLM 返回的值已经包含了原文本（或者原文本的前一部分），则不需要追加，直接覆盖即可
                             # 简单的模糊检查
@@ -399,20 +566,27 @@ class AutoTable:
                             cell.add_paragraph(str(value))
                         else:
                             # 尝试保留原有样式
+                            filled_via_smart = False
                             if cell.paragraphs:
-                                # 获取第一段的样式（如果有）
-                                first_para = cell.paragraphs[0]
-                                style = first_para.style
-                                
-                                # 清空并重写
-                                cell.text = str(value)
-                                
-                                # 重新应用样式（简单尝试）
+                                # 优先尝试智能下划线填充
+                                if self._smart_fill_paragraph(cell.paragraphs[0], value):
+                                    filled_via_smart = True
+                            
+                            if not filled_via_smart:
                                 if cell.paragraphs:
-                                    cell.paragraphs[0].style = style
-                            else:
-                                # 确保值为字符串
-                                cell.text = str(value)
+                                    # 获取第一段的样式（如果有）
+                                    first_para = cell.paragraphs[0]
+                                    style = first_para.style
+                                    
+                                    # 清空并重写
+                                    cell.text = str(value)
+                                    
+                                    # 重新应用样式（简单尝试）
+                                    if cell.paragraphs:
+                                        cell.paragraphs[0].style = style
+                                else:
+                                    # 确保值为字符串
+                                    cell.text = str(value)
                             
                         filled_count += 1
                         logger.debug(f"表格锚点 {anchor_id} 已填充值: {value}")
