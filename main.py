@@ -31,9 +31,14 @@ if __name__ == "__main__":
     else:
         raise ValueError(f"无效的运行模式: {RUN_MODE}")
 
+    # 支持自动切换 .xlsx 或 .json
+    kb_path = "知识库/复杂表格.xlsx"
+    if not os.path.exists(kb_path):
+        kb_path = "知识库/extracted_knowledge.json"
+
     auto_table = AutoTable(
-        knowledge_base_path="知识库.xlsx",
-        word_template_path="表格模版.docx",
+        knowledge_base_path=kb_path,
+        word_template_path="模版/复杂表格.docx",
         llm_client=llm_client
     )
 
