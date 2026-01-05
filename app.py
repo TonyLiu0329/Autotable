@@ -10,6 +10,7 @@ import config
 
 import socket
 from datetime import datetime
+import time
 
 def get_local_ip():
     try:
@@ -64,57 +65,159 @@ def save_to_history(source_path, target_filename, history_dir="history", max_rec
 def load_css():
     st.markdown("""
         <style>
-        /* 入场动画 */
-        @keyframes fadeIn {
-            0% { opacity: 0; transform: translateY(20px); }
-            100% { opacity: 1; transform: translateY(0); }
-        }
+        /* 全局深色背景 */
         .stApp {
-            font-family: 'Source Sans Pro', sans-serif;
-            animation: fadeIn 0.8s ease-out;
+            background-color: #1E1E1E;
+            color: #E0E0E0;
+            font-family: 'Segoe UI', 'Source Sans Pro', sans-serif;
         }
-        /* 标题样式 */
+
+        /* 侧边栏样式覆盖 */
+        [data-testid="stSidebar"] {
+            background-color: #252526;
+            border-right: 1px solid #333;
+        }
+
+        /* 动画定义 */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        @keyframes slideInRight {
+            from { opacity: 0; transform: translateX(20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        /* 增强的容器样式 - 深色模式 */
+        .step-container {
+            animation: slideInRight 0.4s ease-out;
+            padding: 30px;
+            background-color: #2D2D2D;
+            border-radius: 15px;
+            margin-bottom: 25px;
+            border: 1px solid #3E3E3E;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        /* 标题样式 - 提高对比度 */
         h1 {
-            color: #1E88E5;
+            color: #4da6ff;
             text-align: center;
-            font-weight: 700;
-            padding-bottom: 20px;
+            font-weight: 800;
+            padding-bottom: 10px;
+            font-size: 2.5rem;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.2);
         }
-        /* 主按钮样式增强 */
-        .stButton>button[kind="primary"] {
-            background-color: #1E88E5;
-            border: none;
-            border-radius: 8px;
-            height: 50px;
-            font-size: 18px;
+        
+        .description-text {
+            text-align: center;
+            color: #B0B0B0;
+            margin-bottom: 40px;
+            font-size: 1.1rem;
+        }
+
+        /* 步骤指示器美化 - 深色模式 */
+        .step-indicator {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 40px;
             font-weight: 600;
-            transition: all 0.3s ease;
+            color: #808080;
+            position: relative;
         }
-        .stButton>button[kind="primary"]:hover {
-            background-color: #1565C0;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        
+        /* 连接线 */
+        .step-indicator::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 20%;
+            right: 20%;
+            height: 2px;
+            background-color: #404040;
+            z-index: 0;
+            transform: translateY(-50%);
         }
-        /* 下载按钮样式 */
-        .stDownloadButton>button {
-            border-radius: 8px;
-            border: 1px solid #4CAF50;
-            color: #4CAF50;
-            background-color: white;
+
+        .step-indicator .step {
+            margin: 0 30px;
+            padding: 10px 20px;
+            position: relative;
+            z-index: 1;
+            background-color: #1E1E1E; /* 与背景色一致，遮挡线条 */
+            border-radius: 20px;
             transition: all 0.3s;
+            border: 1px solid #333;
         }
-        .stDownloadButton>button:hover {
-            background-color: #E8F5E9;
-            border-color: #2E7D32;
-            color: #2E7D32;
+        
+        .step-indicator .active {
+            color: #4da6ff;
+            background-color: #1a3c5e;
+            border: 1px solid #4da6ff;
+            box-shadow: 0 0 10px rgba(77, 166, 255, 0.3);
         }
+        
+        .step-indicator .completed {
+            color: #4caf50;
+            background-color: #1e3324;
+            border: 1px solid #4caf50;
+        }
+        
+        /* 按钮增强 */
+        .stButton>button {
+            border-radius: 10px;
+            height: 50px;
+            font-weight: 600;
+            transition: all 0.2s;
+            font-size: 16px;
+        }
+        .stButton>button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        }
+
+        /* 输入框和单选框文字颜色 */
+        .stRadio label, .stFileUploader label {
+            color: #E0E0E0 !important;
+        }
+        
+        /* 提示框样式适配 */
+        .stAlert {
+            background-color: #2D2D2D;
+            color: #E0E0E0;
+            border: 1px solid #3E3E3E;
+        }
+
         /* 隐藏页脚 */
         footer {visibility: hidden;}
-        /* 卡片容器微调 */
-        [data-testid="stVerticalBlock"] > [style*="flex-direction: column;"] > [data-testid="stVerticalBlock"] {
-            gap: 1rem;
-        }
         </style>
     """, unsafe_allow_html=True)
+
+def render_step_indicator(current_step):
+    steps = [
+        {"id": 1, "label": "1. 选择来源"},
+        {"id": 2, "label": "2. 上传知识库"},
+        {"id": 3, "label": "3. 填表生成"}
+    ]
+    
+    html = '<div class="step-indicator">'
+    for step in steps:
+        status_class = ""
+        icon = ""
+        if current_step == step["id"]:
+            status_class = "active"
+            icon = "🔷"
+        elif current_step > step["id"]:
+            status_class = "completed"
+            icon = "✅"
+        else:
+            icon = "⚪"
+        
+        html += f'<div class="step {status_class}">{icon} {step["label"]}</div>'
+    html += '</div>'
+    
+    st.markdown(html, unsafe_allow_html=True)
 
 def main():
     st.set_page_config(
@@ -124,286 +227,259 @@ def main():
         initial_sidebar_state="expanded"
     )
     
-    # 加载自定义CSS
     load_css()
     
-    # 顶部标题区
-    st.title("智能填表助手")
-    st.markdown("""
-    <div style='text-align: center; color: #666; margin-bottom: 30px;'>
-        基于大语言模型的自动化文档填充工具，支持 Word/Excel 智能数据提取与回填
-    </div>
-    """, unsafe_allow_html=True)
-
-    # 使用说明折叠区
-    with st.expander("📖 使用指南 (点击展开)", expanded=False):
-        st.markdown("""
-        **如何使用：**
-        1. **配置模型**：在左侧栏设置 LLM (API 或 Ollama)。
-        2. **上传文件**：上传 Word 模板和 Excel/Word 知识库。
-        3. **开始处理**：点击按钮，等待 AI 自动分析并填充表格。
-        4. **下载结果**：处理完成后下载生成的 Word 文档。
-        """)
-    
     # 初始化 session state
+    if 'current_step' not in st.session_state:
+        st.session_state.current_step = 1
+    if 'kb_source_type' not in st.session_state:
+        st.session_state.kb_source_type = "上传 Excel 文件"
+    if 'kb_file_data' not in st.session_state:
+        st.session_state.kb_file_data = None # {'name': str, 'data': bytes}
     if 'processed_file' not in st.session_state:
-        st.session_state.processed_file = None # 存储最终结果 (filename, data)
+        st.session_state.processed_file = None 
     if 'extracted_file' not in st.session_state:
-        st.session_state.extracted_file = None # 存储中间结果 (filename, data)
-    
-    # --- 侧边栏：配置设置 ---
+        st.session_state.extracted_file = None
+        
+    setup_logging()
+
+    # --- 侧边栏 ---
     with st.sidebar:
         st.header("⚙️ 系统设置")
-        
         with st.expander("🧠 LLM 模型配置", expanded=True):
             run_mode = st.radio(
                 "运行模式",
                 ("api", "ollama"),
                 index=0 if config.RUN_MODE == "api" else 1,
-                help="选择使用在线 API (如 OpenAI/DeepSeek) 或本地 Ollama 模型"
+                help="选择使用在线 API 或本地 Ollama 模型"
             )
             
             if run_mode == "api":
-                api_base_url = st.text_input("API Base URL", value=config.API_BASE_URL, help="例如: https://api.openai.com/v1")
-                api_key = st.text_input("API Key", value=config.API_KEY, type="password", help="在此输入您的 API 密钥")
-                api_model = st.text_input("Model Name", value=config.API_MODEL_NAME, help="例如: gpt-4o, deepseek-chat")
+                api_base_url = st.text_input("API Base URL", value=config.API_BASE_URL)
+                api_key = st.text_input("API Key", value=config.API_KEY, type="password")
+                api_model = st.text_input("Model Name", value=config.API_MODEL_NAME)
             else:
-                ollama_host = st.text_input("Ollama Host", value=config.OLLAMA_HOST, help="本地 Ollama 服务地址，通常为 http://localhost:11434")
-                ollama_model = st.text_input("Ollama Model", value=config.OLLAMA_MODEL_NAME, help="已拉取的 Ollama 模型名称，如 qwen2.5:14b")
-        
-        st.info("💡 提示：修改配置后无需重启，直接点击开始处理即可生效。")
+                ollama_host = st.text_input("Ollama Host", value=config.OLLAMA_HOST)
+                ollama_model = st.text_input("Ollama Model", value=config.OLLAMA_MODEL_NAME)
         
         st.divider()
         local_ip = get_local_ip()
-        st.success(f"📡 **局域网共享已开启**\n\可通过以下地址访问：\n**http://{local_ip}:8501**")
-            
-    # 设置日志系统
-    setup_logging()
-
-    # === 在线上传处理区域 ===
-    with st.container(border=True):
-        st.subheader("🌐 在线上传处理")
-        st.info("ℹ️ 请上传您的文件，处理完成后即可下载结果。")
+        st.success(f"📡 局域网访问地址：\n**http://{local_ip}:8501**")
         
-        # 将单选框移至列布局上方，确保下方两个文件上传框对齐
-        kb_source_type = st.radio("📚 知识库来源类型", ("上传 Excel 文件", "从 Word 文档提取"), horizontal=True)
-        
-        col_up1, col_up2 = st.columns(2)
-        with col_up1:
-            uploaded_word = st.file_uploader("📤 上传 Word 模版 (目标)", type=["docx"])
-        with col_up2:
-            if kb_source_type == "上传 Excel 文件":
-                uploaded_kb = st.file_uploader("📤 上传 Excel 知识库", type=["xlsx"])
-                uploaded_kb_is_docx = False
-            else:
-                uploaded_kb = st.file_uploader("📤 上传 Word 来源文档", type=["docx"], key="upload_kb_docx")
-                uploaded_kb_is_docx = True
-        
-        st.markdown("###")
-        start_btn_web = st.button("🚀 开始处理并生成下载", type="primary", use_container_width=True)
-    
-    # 处理结果显示区域
-    result_container = st.container()
-    
-    if start_btn_web:
-        # 重置之前的状态
-        st.session_state.processed_file = None
-        st.session_state.extracted_file = None
-        
-        if not uploaded_word or not uploaded_kb:
-            st.error("⚠️ 请确保已上传 Word 模版和知识库文件！")
-        else:
-            try:
-                # 创建临时目录
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    # 保存 Word 模版
-                    temp_word_path = os.path.join(temp_dir, uploaded_word.name)
-                    with open(temp_word_path, "wb") as f:
-                        f.write(uploaded_word.getbuffer())
-                    
-                    # 处理知识库
-                    kb_path = ""
-                    if uploaded_kb_is_docx:
-                        # 保存来源 Word
-                        temp_source_docx = os.path.join(temp_dir, "source.docx")
-                        with open(temp_source_docx, "wb") as f:
-                            f.write(uploaded_kb.getbuffer())
-                        
-                        # 提取为 Excel 或 JSON
-                        
-                        # 初始化 Client (提前初始化，因为提取也可能需要 LLM)
-                        if run_mode == "api":
-                            client = APIClient(api_base_url, api_key, api_model)
-                        else:
-                            client = OllamaClient(ollama_host, ollama_model)
-                        
-                        temp_extracted_kb = os.path.join(temp_dir, "extracted_knowledge.json") # 默认改为 JSON
-                        
-                        with st.status("🔍 正在智能分析文档...", expanded=True) as status:
-                            st.write("正在读取源文档...")
-                            # 使用新的智能提取函数
-                            extract_success = extract_content_to_json(temp_source_docx, temp_extracted_kb, client)
-                            
-                            if not extract_success:
-                                status.update(label="❌ 数据提取失败", state="error")
-                                st.error("从 Word 文档提取数据失败！")
-                                st.stop()
-                            
-                            kb_path = temp_extracted_kb
-                            st.write("✅ 数据提取完成，准备填表...")
-                            
-                            # 读取提取的文件用于下载
-                            with open(temp_extracted_kb, "rb") as f:
-                                extracted_data = f.read()
-                            st.session_state.extracted_file = ("extracted_knowledge.json", extracted_data)
-                                
-                            st.write("正在填充目标表格...")
-                            
-                            temp_output_dir = os.path.join(temp_dir, "output")
-                                
-                            # 运行 AutoTable
-                            at = AutoTable(
-                                knowledge_base_path=kb_path,
-                                word_template_path=temp_word_path,
-                                llm_client=client,
-                                output_folder=temp_output_dir
-                            )
-                            success = at.run()
-                            
-                            if success:
-                                status.update(label="✅ 处理完成！", state="complete", expanded=False)
-                                # 查找生成的文件
-                                generated_files = [f for f in os.listdir(temp_output_dir) if f.endswith(".docx")]
-                                if generated_files:
-                                        result_file = generated_files[0]
-                                        result_path = os.path.join(temp_output_dir, result_file)
-                                        
-                                        # 保存到历史记录
-                                        save_to_history(result_path, result_file)
-                                        
-                                        # 读取文件用于下载
-                                        with open(result_path, "rb") as f:
-                                            file_data = f.read()
-                                        st.session_state.processed_file = (result_file, file_data)
-                                        
-                                        st.balloons()
-                                        st.success("✅ 文档已生成，请点击下方按钮下载。")
-                                else:
-                                    status.update(label="❌ 未生成文件", state="error")
-                                    st.error("❌ 未找到生成的文件。")
-                            else:
-                                status.update(label="❌ 处理失败", state="error")
-                                st.error("❌ 处理失败，请检查文件内容是否规范。")
-
-                    else:
-                        # Excel 流程 (保持 simpler spinner)
-                        kb_path = os.path.join(temp_dir, uploaded_kb.name)
-                        with open(kb_path, "wb") as f:
-                            f.write(uploaded_kb.getbuffer())
-                        
-                        if run_mode == "api":
-                            client = APIClient(api_base_url, api_key, api_model)
-                        else:
-                            client = OllamaClient(ollama_host, ollama_model)
-                        
-                        temp_output_dir = os.path.join(temp_dir, "output")
-                        
-                        with st.status("🔄 正在处理表格...", expanded=True) as status:
-                            at = AutoTable(
-                                knowledge_base_path=kb_path,
-                                word_template_path=temp_word_path,
-                                llm_client=client,
-                                output_folder=temp_output_dir
-                            )
-                            success = at.run()
-                            
-                            if success:
-                                status.update(label="✅ 处理完成！", state="complete", expanded=False)
-                                generated_files = [f for f in os.listdir(temp_output_dir) if f.endswith(".docx")]
-                                if generated_files:
-                                    result_file = generated_files[0]
-                                    result_path = os.path.join(temp_output_dir, result_file)
-                                    
-                                    # 保存到历史记录
-                                    save_to_history(result_path, result_file)
-
-                                    with open(result_path, "rb") as f:
-                                        file_data = f.read()
-                                    st.session_state.processed_file = (result_file, file_data)
-                                    st.balloons()
-                                else:
-                                    st.error("❌ 未找到生成的文件。")
-                            else:
-                                status.update(label="❌ 处理失败", state="error")
-                                st.error("❌ 处理失败。")
-                            
-            except Exception as e:
-                st.error(f"处理过程中发生异常: {str(e)}")
-    
-    # 在主循环中渲染下载按钮（持久化显示）
-    if st.session_state.extracted_file or st.session_state.processed_file:
         st.markdown("---")
-        st.subheader("📥 结果下载")
-        dl_col1, dl_col2 = st.columns(2)
-        
-        with dl_col1:
-            if st.session_state.extracted_file:
-                fname, data = st.session_state.extracted_file
-                st.download_button(
-                    label=f"⬇️ 下载提取的中间数据\n({os.path.splitext(fname)[1]})",
-                    data=data,
-                    file_name=fname,
-                    mime="application/json" if fname.endswith(".json") else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="btn_dl_extracted",
-                    use_container_width=True
-                )
-            
-        with dl_col2:
-            if st.session_state.processed_file:
-                fname, data = st.session_state.processed_file
-                st.download_button(
-                    label=f"⬇️ 下载最终结果文档\n{fname}",
-                    data=data,
-                    file_name=fname,
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    key="btn_dl_final",
-                    use_container_width=True,
-                    type="primary" 
-                )
+        with st.expander("📖 使用指南", expanded=False):
+            st.markdown("""
+            1. **选择来源**：Excel 适合结构化数据，Word 适合提取简历等非结构化文档。
+            2. **上传知识库**：上传包含数据的文件。
+            3. **上传模板**：上传需要填充的 Word 模板 (.docx)，系统会自动识别下划线和表格进行填充。
+            """)
+
+    # --- 主体区域 ---
+    st.title("🤖 智能填表助手")
+    st.markdown("""
+    <div class='description-text'>
+        基于大语言模型的自动化文档填充工具，支持 Word/Excel 智能数据提取与回填<br>
+        让 AI 帮你完成繁琐的表格填写工作
+    </div>
+    """, unsafe_allow_html=True)
     
-    st.markdown("---")
-    with st.expander("📜 历史生成记录 (点击展开)", expanded=False):
-        history_dir = "history"
-        if not os.path.exists(history_dir):
-            os.makedirs(history_dir)
+    render_step_indicator(st.session_state.current_step)
+
+    # 容器用于页面切换
+    placeholder = st.empty()
+
+    # === STEP 1: 选择来源 ===
+    if st.session_state.current_step == 1:
+        with placeholder.container():
+            # 使用 container 上下文管理器，Streamlit 会自动将其内容放入 div 中（虽然 st.markdown 无法直接包裹，但这是 Streamlit 的限制）
+            # 为了真正实现“包裹”，我们需要在 container 内部使用 CSS hack 或者接受 Streamlit 的默认布局
+            # 但为了满足用户的“卡片感”，我们可以在 container 内部先渲染一个 div start，最后渲染 div end
+            # 注意：Streamlit 的 container 只是逻辑分组，不产生 DOM 节点包裹。
+            # 正确的做法是：使用 st.markdown 渲染 HTML 包裹，但 Streamlit 组件无法嵌入 HTML 字符串中。
+            # 妥协方案：使用 st.container(border=True) (Streamlit 1.30+ 支持) 或者保留目前的 CSS 注入方式，
+            # 但目前的 CSS 注入方式确实没有把组件“包”进去，因为组件是在 markdown 之后渲染的。
             
-        files = [f for f in os.listdir(history_dir) if f.endswith(".docx")]
-        # 按修改时间倒序
-        files.sort(key=lambda x: os.path.getmtime(os.path.join(history_dir, x)), reverse=True)
-        
-        if not files:
-            st.info("暂无历史记录")
-        else:
-            st.write(f"共找到 {len(files)} 条记录")
-            # 表格展示：文件名 | 大小 | 时间 | 下载
-            for f in files:
-                file_path = os.path.join(history_dir, f)
-                col1, col2, col3 = st.columns([3, 1, 1])
+            # 修正方案：Streamlit 原生 st.container(border=True) 是最佳选择，能产生带边框的容器。
+            # 配合自定义 CSS 修改这个原生容器的样式。
+            
+            with st.container(border=True):
+                st.subheader("步骤 1: 选择知识库来源")
+                st.info("💡 请选择您的数据来源格式。Excel 适合结构化数据，Word 适合非结构化文档提取。")
+                
+                kb_type = st.radio(
+                    "知识库类型", 
+                    ("上传 Excel 文件", "从 Word 文档提取"), 
+                    index=0 if st.session_state.kb_source_type == "上传 Excel 文件" else 1,
+                    horizontal=True
+                )
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                col1, col2 = st.columns([1, 4])
                 with col1:
-                    st.write(f"📄 {f}")
-                with col2:
-                    # 显示时间
-                    mtime = datetime.fromtimestamp(os.path.getmtime(file_path)).strftime('%Y-%m-%d %H:%M')
-                    st.caption(mtime)
-                with col3:
-                    with open(file_path, "rb") as file:
+                    if st.button("下一步 ➡️", type="primary", use_container_width=True):
+                        st.session_state.kb_source_type = kb_type
+                        st.session_state.current_step = 2
+                        st.rerun()
+
+    # === STEP 2: 上传知识库 ===
+    elif st.session_state.current_step == 2:
+        with placeholder.container():
+            with st.container(border=True):
+                st.subheader(f"步骤 2: {st.session_state.kb_source_type}")
+                
+                uploaded_kb = None
+                if st.session_state.kb_source_type == "上传 Excel 文件":
+                    uploaded_kb = st.file_uploader("📤 上传 Excel (.xlsx) 文件", type=["xlsx"])
+                else:
+                    uploaded_kb = st.file_uploader("📤 上传 Word (.docx) 来源文档", type=["docx"])
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                col_back, col_next = st.columns([1, 4])
+                
+                with col_back:
+                    if st.button("⬅️ 上一步", use_container_width=True):
+                        st.session_state.current_step = 1
+                        st.rerun()
+                
+                with col_next:
+                    # 检查是否已有文件
+                    has_file = uploaded_kb is not None
+                    if st.button("下一步 ➡️", type="primary", disabled=not has_file, use_container_width=True):
+                        if uploaded_kb:
+                            # 保存文件内容到 session state
+                            st.session_state.kb_file_data = {
+                                "name": uploaded_kb.name,
+                                "data": uploaded_kb.getvalue(),
+                                "type": "docx" if st.session_state.kb_source_type == "从 Word 文档提取" else "xlsx"
+                            }
+                            st.session_state.current_step = 3
+                            st.rerun()
+                
+                if not uploaded_kb and st.session_state.kb_file_data:
+                    st.info(f"✅ 已缓存文件: {st.session_state.kb_file_data['name']}")
+
+    # === STEP 3: 上传模板并运行 ===
+    elif st.session_state.current_step == 3:
+        with placeholder.container():
+            with st.container(border=True):
+                st.subheader("步骤 3: 上传模板并生成")
+                
+                # 显示已就绪的知识库
+                if st.session_state.kb_file_data:
+                    st.success(f"✅ 知识库已就绪: {st.session_state.kb_file_data['name']}")
+                else:
+                    st.error("❌ 知识库丢失，请返回重新上传")
+
+                uploaded_template = st.file_uploader("📤 上传 Word (.docx) 模板文件", type=["docx"])
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                col_back, col_run = st.columns([1, 4])
+                
+                with col_back:
+                    if st.button("⬅️ 上一步", use_container_width=True):
+                        st.session_state.current_step = 2
+                        st.rerun()
+                
+                with col_run:
+                    run_disabled = uploaded_template is None or st.session_state.kb_file_data is None
+                    if st.button("🚀 开始处理", type="primary", disabled=run_disabled, use_container_width=True):
+                        # 执行处理逻辑
+                        with st.spinner("正在初始化环境..."):
+                            try:
+                                with tempfile.TemporaryDirectory() as temp_dir:
+                                    # 1. 恢复知识库文件
+                                    kb_info = st.session_state.kb_file_data
+                                    kb_path = os.path.join(temp_dir, kb_info["name"])
+                                    with open(kb_path, "wb") as f:
+                                        f.write(kb_info["data"])
+                                    
+                                    # 2. 保存模板文件
+                                    temp_word_path = os.path.join(temp_dir, uploaded_template.name)
+                                    with open(temp_word_path, "wb") as f:
+                                        f.write(uploaded_template.getbuffer())
+
+                                    # 3. 初始化 LLM
+                                    if run_mode == "api":
+                                        client = APIClient(api_base_url, api_key, api_model)
+                                    else:
+                                        client = OllamaClient(ollama_host, ollama_model)
+
+                                    # 4. 如果是 Word 知识库，先提取
+                                    final_kb_path = kb_path
+                                    if kb_info["type"] == "docx":
+                                        json_kb_path = os.path.join(temp_dir, "extracted.json")
+                                        with st.status("🔍 正在分析文档内容...", expanded=True) as status:
+                                            extract_success = extract_content_to_json(kb_path, json_kb_path, client)
+                                            if not extract_success:
+                                                status.update(label="❌ 提取失败", state="error")
+                                                st.error("知识库提取失败")
+                                                st.stop()
+                                            final_kb_path = json_kb_path
+                                            
+                                            # 保存提取结果供下载
+                                            with open(final_kb_path, "rb") as f:
+                                                st.session_state.extracted_file = ("extracted_knowledge.json", f.read())
+
+                                    # 5. 运行 AutoTable
+                                    temp_output_dir = os.path.join(temp_dir, "output")
+                                    with st.status("🤖 正在智能填表...", expanded=True) as status:
+                                        at = AutoTable(final_kb_path, temp_word_path, client, temp_output_dir)
+                                        if at.run():
+                                            status.update(label="✅ 完成！", state="complete")
+                                            # 处理结果
+                                            generated_files = [f for f in os.listdir(temp_output_dir) if f.endswith(".docx")]
+                                            if generated_files:
+                                                result_file = generated_files[0]
+                                                result_path = os.path.join(temp_output_dir, result_file)
+                                                save_to_history(result_path, result_file)
+                                                with open(result_path, "rb") as f:
+                                                    st.session_state.processed_file = (result_file, f.read())
+                                                st.balloons()
+                                            else:
+                                                st.error("未生成文件")
+                                        else:
+                                            status.update(label="❌ 失败", state="error")
+                                            st.error("填表过程出错")
+                                            
+                            except Exception as e:
+                                st.error(f"发生错误: {str(e)}")
+
+            
+            # 显示下载区域 (仅在 Step 3 显示)
+            if st.session_state.processed_file:
+                with st.container(border=True):
+                    st.success("✅ 文档生成成功！")
+                    fname, data = st.session_state.processed_file
+                    st.download_button(
+                        label=f"⬇️ 下载结果: {fname}",
+                        data=data,
+                        file_name=fname,
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        type="primary",
+                        use_container_width=True
+                    )
+                    if st.session_state.extracted_file:
+                        ex_fname, ex_data = st.session_state.extracted_file
                         st.download_button(
-                            label="⬇️ 下载",
-                            data=file,
-                            file_name=f,
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            key=f"dl_hist_{f}"
+                            label="⬇️ 下载中间提取数据 (JSON)",
+                            data=ex_data,
+                            file_name=ex_fname,
+                            mime="application/json",
+                            use_container_width=True
                         )
+
+    # --- 底部历史记录 (始终显示) ---
+    st.markdown("---")
+    with st.expander("📜 历史生成记录", expanded=False):
+        history_dir = "history"
+        if os.path.exists(history_dir):
+            files = [f for f in os.listdir(history_dir) if f.endswith(".docx")]
+            files.sort(key=lambda x: os.path.getmtime(os.path.join(history_dir, x)), reverse=True)
+            for f in files:
+                col1, col2 = st.columns([4, 1])
+                col1.text(f"📄 {f}")
+                with open(os.path.join(history_dir, f), "rb") as file:
+                    col2.download_button("下载", file, file_name=f, key=f"hist_{f}")
 
 if __name__ == "__main__":
     main()
