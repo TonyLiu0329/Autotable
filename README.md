@@ -10,7 +10,7 @@
 ## 主要功能
 ✅ **智能填写表格**：基于大语言模型分析表格结构，自动映射并填充数据。  
 ✅ **多格式知识库支持**：除了 **Excel (.xlsx)**，现已新增支持从 **Word (.docx)** 文档中智能提取数据作为知识库，同时也支持 **JSON** 格式。  
-✅ **Web 可视化界面**：提供基于 Streamlit 的 Web 界面，支持文件拖拽上传、在线配置模型、结果下载及历史记录管理。  
+✅ **全新 Web 界面**：提供基于 Streamlit 的**深色模式** Web 界面，采用直观的**分步向导**流程，支持文件拖拽上传、在线配置模型、结果下载及**智能历史记录管理**（自动保留最新10条记录）。
 ✅ **智能段落填充**：自动识别文档中的下划线占位符，智能填入内容并保持原有下划线格式；支持追加模式，防止覆盖原有标签（如“姓名：”）。  
 ✅ **上下文感知**：在处理多个相似表格或段落时，能够自动切换不同的实体数据（如不同的人员或项目），避免重复填充。  
 ✅ **双模引擎支持**：支持本地 **Ollama** 模型和云端 **OpenAI 协议 API**（如 DeepSeek, GPT-4）。  
@@ -74,7 +74,7 @@ I recently developed another offline automated form filling application that doe
 ## Features
 ✅ **Smart Table Filling**: Analyzes table structures using LLMs to automatically map and fill data.
 ✅ **Multi-Format Knowledge Base**: Supports **Excel (.xlsx)**, **Word (.docx)** (via intelligent extraction), and **JSON** files.
-✅ **Web Interface**: Provides a Streamlit-based Web UI for easy file uploads, configuration, downloading results, and managing history.
+✅ **Web Interface**: Features a modern **Dark Mode** UI with a **Step-by-Step Wizard** workflow. Supports file uploads, online configuration, result downloading, and **Smart History Management** (automatically keeps the latest 10 records).
 ✅ **Smart Paragraph Filling**: Automatically detects underlined placeholders to preserve formatting; supports append mode to avoid overwriting labels (e.g., "Name: ").
 ✅ **Context Awareness**: Automatically switches entities (e.g., different people or projects) when processing multiple similar tables/sections to avoid duplication.
 ✅ **Dual Engine Support**: Supports local **Ollama** models and cloud **OpenAI-compatible APIs** (e.g., DeepSeek, GPT-4).
