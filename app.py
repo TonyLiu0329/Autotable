@@ -34,7 +34,7 @@ def setup_logging():
         console_handler.setLevel(logging.INFO)
         root_logger.addHandler(console_handler)
 
-def save_to_history(source_path, target_filename, history_dir="history", max_records=20):
+def save_to_history(source_path, target_filename, history_dir="history", max_records=10):
     """保存文件到历史记录，并自动清理旧记录"""
     if not os.path.exists(history_dir):
         os.makedirs(history_dir)
@@ -275,7 +275,7 @@ def main():
             """)
 
     # --- 主体区域 ---
-    st.title("🤖 智能填表助手")
+    st.title("智能填表助手")
     st.markdown("""
     <div class='description-text'>
         基于大语言模型的自动化文档填充工具，支持 Word/Excel 智能数据提取与回填<br>
@@ -291,14 +291,6 @@ def main():
     # === STEP 1: 选择来源 ===
     if st.session_state.current_step == 1:
         with placeholder.container():
-            # 使用 container 上下文管理器，Streamlit 会自动将其内容放入 div 中（虽然 st.markdown 无法直接包裹，但这是 Streamlit 的限制）
-            # 为了真正实现“包裹”，我们需要在 container 内部使用 CSS hack 或者接受 Streamlit 的默认布局
-            # 但为了满足用户的“卡片感”，我们可以在 container 内部先渲染一个 div start，最后渲染 div end
-            # 注意：Streamlit 的 container 只是逻辑分组，不产生 DOM 节点包裹。
-            # 正确的做法是：使用 st.markdown 渲染 HTML 包裹，但 Streamlit 组件无法嵌入 HTML 字符串中。
-            # 妥协方案：使用 st.container(border=True) (Streamlit 1.30+ 支持) 或者保留目前的 CSS 注入方式，
-            # 但目前的 CSS 注入方式确实没有把组件“包”进去，因为组件是在 markdown 之后渲染的。
-            
             # 修正方案：Streamlit 原生 st.container(border=True) 是最佳选择，能产生带边框的容器。
             # 配合自定义 CSS 修改这个原生容器的样式。
             
@@ -434,7 +426,6 @@ def main():
                                                 save_to_history(result_path, result_file)
                                                 with open(result_path, "rb") as f:
                                                     st.session_state.processed_file = (result_file, f.read())
-                                                st.balloons()
                                             else:
                                                 st.error("未生成文件")
                                         else:

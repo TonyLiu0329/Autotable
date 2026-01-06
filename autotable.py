@@ -2,6 +2,8 @@ import os
 import pandas as pd
 import logging
 from docx import Document
+from docx.oxml.ns import qn
+from docx.shared import Pt, RGBColor
 import json
 from datetime import datetime
 
@@ -379,6 +381,131 @@ class AutoTable:
                 return json_match.group(1)
             raise ValueError("未找到有效JSON内容")
 
+    def _extract_paragraph_char_style(self, paragraph):
+        """从段落属性(pPr)中提取默认字符样式"""
+        style = {}
+        try:
+            # 访问底层 XML 元素
+            p = paragraph._element
+            if p.pPr is None:
+                return style
+            
+            # 安全获取 rPr (Run Properties)
+            # 注意：pPr 是一个 CT_PPr 对象，它可能没有直接的 .rPr 属性访问器
+            # 我们应该使用 find 方法来查找子元素
+            rPr = p.pPr.find(qn('w:rPr'))
+            
+            if rPr is None:
+                return style
+            
+            # 1. 字体名称
+            # rPr.rFonts 可能也是通过 find 获取
+            rFonts = rPr.find(qn('w:rFonts'))
+            if rFonts is not None:
+                # 优先取中文字体(eastAsia)，其次 ascii
+                font_name = rFonts.get(qn('w:eastAsia')) or rFonts.get(qn('w:ascii'))
+                if font_name:
+                    style['name'] = font_name
+            
+            # 2. 字号 (XML中是半点，1/144英寸)
+            sz = rPr.find(qn('w:sz'))
+            if sz is not None and sz.val is not None:
+                try:
+                    # Pt(1) = 2 half-points
+                    # 正常情况：half-points / 2 = points
+                    # 异常情况：某些文档中可能存储的是 EMU 值 (1 pt = 12700 EMU)
+                    val = int(sz.val)
+                    
+                    # 阈值判断：如果值大于 4000 (即 2000pt)，几乎可以肯定是 EMU 单位
+                    # 正常的字号通常在 1-100pt (2-200 half-points) 之间
+                    if val > 4000:
+                        style['size'] = val # 直接作为 EMU 使用
+                    else:
+                        style['size'] = Pt(val / 2) # 作为 half-points 转换
+                except Exception:
+                    pass
+
+            # 3. 加粗
+            b = rPr.find(qn('w:b'))
+            if b is not None:
+                # 标签存在即为真，除非显式设为 false/0
+                val = b.val
+                style['bold'] = False if val in ['0', 'false', 'off'] else True
+            
+            # 4. 颜色
+            color = rPr.find(qn('w:color'))
+            if color is not None and color.val is not None:
+                hex_color = color.val
+                if hex_color != 'auto':
+                    try:
+                        style['color'] = RGBColor.from_string(hex_color)
+                    except Exception:
+                        pass
+                        
+            # 5. 斜体
+            i = rPr.find(qn('w:i'))
+            if i is not None:
+                 val = i.val
+                 style['italic'] = False if val in ['0', 'false', 'off'] else True
+                 
+        except Exception as e:
+            logger.warning(f"提取段落默认样式失败: {e}")
+            
+        return style
+
+    def _extract_run_style(self, run):
+        """提取Run的字体样式"""
+        style = {}
+        if not run:
+            return style
+        
+        # 基础属性
+        if run.font.name:
+            style['name'] = run.font.name
+        if run.font.size:
+            style['size'] = run.font.size
+        if run.font.bold is not None:
+            style['bold'] = run.font.bold
+        if run.font.italic is not None:
+            style['italic'] = run.font.italic
+        if run.font.color and run.font.color.rgb:
+            style['color'] = run.font.color.rgb
+        if run.font.underline:
+            style['underline'] = run.font.underline
+            
+        if style:
+            logger.info(f"成功提取字体样式: {style}")
+        else:
+            logger.info("未提取到显式字体样式 (可能是默认样式，将继承段落设置)")
+            
+        return style
+
+    def _apply_run_style(self, run, style):
+        """应用字体样式到Run"""
+        if not style:
+            return
+            
+        if 'name' in style:
+            run.font.name = style['name']
+            # 设置中文字体
+            try:
+                rPr = run._element.get_or_add_rPr()
+                rFonts = rPr.get_or_add_rFonts()
+                rFonts.set(qn('w:eastAsia'), style['name'])
+            except Exception as e:
+                logger.warning(f"设置中文字体失败: {e}")
+            
+        if 'size' in style:
+            run.font.size = style['size']
+        if 'bold' in style:
+            run.font.bold = style['bold']
+        if 'italic' in style:
+            run.font.italic = style['italic']
+        if 'color' in style:
+            run.font.color.rgb = style['color']
+        if 'underline' in style:
+            run.font.underline = style['underline']
+
     def _smart_fill_paragraph(self, para, value):
         """
         尝试智能填充：如果段落包含下划线/空格占位符，则只替换占位符部分，并保留下划线格式。
@@ -590,9 +717,21 @@ class AutoTable:
                         
                         if should_append:
                             logger.info(f"检测到指令性表头，采用追加模式: {anchor_id}")
-                            # 追加新段落
+                            
+                            # 1. 尝试从现有标题（第一段）提取样式
+                            font_style = {}
+                            if cell.paragraphs and cell.paragraphs[0].runs:
+                                font_style = self._extract_run_style(cell.paragraphs[0].runs[0])
+                                logger.info(f"锚点 {anchor_id}: 追加模式下，成功从标题提取字体样式: {font_style}")
+                            
+                            # 2. 追加新段落
                             # 注意：add_paragraph 会在单元格末尾添加新段落
-                            cell.add_paragraph(str(value))
+                            new_para = cell.add_paragraph(str(value))
+                            
+                            # 3. 应用样式
+                            if font_style:
+                                for run in new_para.runs:
+                                    self._apply_run_style(run, font_style)
                         else:
                             # 尝试保留原有样式
                             filled_via_smart = False
@@ -603,16 +742,36 @@ class AutoTable:
                             
                             if not filled_via_smart:
                                 if cell.paragraphs:
-                                    # 获取第一段的样式（如果有）
+                                    # 获取第一段
                                     first_para = cell.paragraphs[0]
-                                    style = first_para.style
                                     
-                                    # 清空并重写
-                                    cell.text = str(value)
+                                    # 调试信息：检查Runs状态
+                                    if not first_para.runs:
+                                        logger.info(f"锚点 {anchor_id}: 单元格段落无 Runs (可能是空单元格)，无法提取预设样式。建议在模板中输入一个空格并设置样式。")
                                     
-                                    # 重新应用样式（简单尝试）
-                                    if cell.paragraphs:
-                                        cell.paragraphs[0].style = style
+                                    # 尝试提取字体样式（从第一个Run）
+                                    font_style = {}
+                                    if first_para.runs:
+                                        font_style = self._extract_run_style(first_para.runs[0])
+                                    else:
+                                        # 如果当前单元格为空（无Run），尝试从段落属性(pPr)中提取预设的字符样式
+                                        # 这通常是用户在空单元格中设置的格式
+                                        font_style = self._extract_paragraph_char_style(first_para)
+                                        if font_style:
+                                            logger.info(f"锚点 {anchor_id}: 成功从空单元格提取预设样式: {font_style}")
+                                        else:
+                                            logger.info(f"锚点 {anchor_id}: 当前单元格为空且无预设样式，将使用默认样式填充")
+
+                                    # 清空段落内容但保留段落属性
+                                    # 注意：first_para.clear() 会清除所有runs，但保留段落样式
+                                    first_para.clear()
+                                    
+                                    # 添加新内容
+                                    new_run = first_para.add_run(str(value))
+                                    
+                                    # 应用字体样式
+                                    if font_style:
+                                        self._apply_run_style(new_run, font_style)
                                 else:
                                     # 确保值为字符串
                                     cell.text = str(value)
