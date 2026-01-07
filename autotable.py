@@ -613,58 +613,59 @@ class AutoTable:
         used_identities = [] # 全局追踪已使用的实体标识
         
         # --- 1. 处理正文段落 ---
-        logger.info("正在处理正文段落...")
-        para_markdown, para_anchor_map, para_id_to_text_map = self._preprocess_paragraphs(self.doc.paragraphs)
+        # 用户需求变更：只需要回填表格的内容，不需要回填正文段落（包括下划线、占位符、Label等）
+        # logger.info("正在处理正文段落...")
+        # para_markdown, para_anchor_map, para_id_to_text_map = self._preprocess_paragraphs(self.doc.paragraphs)
         
-        if para_anchor_map:
-            logger.info(f"发现 {len(para_anchor_map)} 个段落填空位，正在请求 LLM 分析...")
-            fill_map = self.analyze_tables_with_llm(para_markdown, self.knowledge_dict, para_id_to_text_map, used_contexts=used_identities)
+        # if para_anchor_map:
+        #     logger.info(f"发现 {len(para_anchor_map)} 个段落填空位，正在请求 LLM 分析...")
+        #     fill_map = self.analyze_tables_with_llm(para_markdown, self.knowledge_dict, para_id_to_text_map, used_contexts=used_identities)
             
-            # 提取并记录本次使用的实体标识
-            identity = fill_map.pop("__identity__", None)
-            if identity:
-                used_identities.append(identity)
-                logger.info(f"正文段落使用了实体: {identity}")
+        #     # 提取并记录本次使用的实体标识
+        #     identity = fill_map.pop("__identity__", None)
+        #     if identity:
+        #         used_identities.append(identity)
+        #         logger.info(f"正文段落使用了实体: {identity}")
             
-            for anchor_id, value in fill_map.items():
-                if anchor_id in para_anchor_map:
-                    try:
-                        idx = para_anchor_map[anchor_id]
-                        para = self.doc.paragraphs[idx]
+        #     for anchor_id, value in fill_map.items():
+        #         if anchor_id in para_anchor_map:
+        #             try:
+        #                 idx = para_anchor_map[anchor_id]
+        #                 para = self.doc.paragraphs[idx]
                         
-                        # 智能填充逻辑
-                        original_text = para.text.strip()
-                        clean_val = str(value).strip()
+        #                 # 智能填充逻辑
+        #                 original_text = para.text.strip()
+        #                 clean_val = str(value).strip()
 
-                        # 优先尝试智能下划线填充
-                        if self._smart_fill_paragraph(para, clean_val):
-                            filled_count += 1
-                            logger.debug(f"段落锚点 {anchor_id} 采用下划线保留模式填充")
-                            continue
+        #                 # 优先尝试智能下划线填充
+        #                 if self._smart_fill_paragraph(para, clean_val):
+        #                     filled_count += 1
+        #                     logger.debug(f"段落锚点 {anchor_id} 采用下划线保留模式填充")
+        #                     continue
                         
-                        # 检查是否是 "Label: " 形式的纯标签段落（无下划线占位符）
-                        # 如果是，且 LLM 返回的值没有包含 Label，则采用追加模式，防止覆盖标签
-                        is_pure_label = re.search(r'[:：]\s*$', original_text)
+        #                 # 检查是否是 "Label: " 形式的纯标签段落（无下划线占位符）
+        #                 # 如果是，且 LLM 返回的值没有包含 Label，则采用追加模式，防止覆盖标签
+        #                 is_pure_label = re.search(r'[:：]\s*$', original_text)
                         
-                        if is_pure_label and not clean_val.startswith(original_text[:min(5, len(original_text))]):
-                             # 追加模式：保留原标签，追加内容
-                             para.add_run(f" {clean_val}")
-                             logger.debug(f"段落锚点 {anchor_id} 采用追加模式填充")
-                        else:
-                            # 覆盖模式：全段替换
-                            # 注意：这会丢失段落内的部分格式（如加粗），但保留段落整体样式
-                            style = para.style
-                            para.text = clean_val
-                            para.style = style
+        #                 if is_pure_label and not clean_val.startswith(original_text[:min(5, len(original_text))]):
+        #                      # 追加模式：保留原标签，追加内容
+        #                      para.add_run(f" {clean_val}")
+        #                      logger.debug(f"段落锚点 {anchor_id} 采用追加模式填充")
+        #                 else:
+        #                     # 覆盖模式：全段替换
+        #                     # 注意：这会丢失段落内的部分格式（如加粗），但保留段落整体样式
+        #                     style = para.style
+        #                     para.text = clean_val
+        #                     para.style = style
                         
-                        filled_count += 1
-                        logger.debug(f"段落锚点 {anchor_id} 已填充值: {value}")
-                    except Exception as e:
-                        logger.error(f"段落填充异常: {anchor_id} - {str(e)}")
-                else:
-                    logger.warning(f"LLM返回了不存在的段落锚点ID: {anchor_id}")
-        else:
-            logger.info("正文段落中未发现填空位")
+        #                 filled_count += 1
+        #                 logger.debug(f"段落锚点 {anchor_id} 已填充值: {value}")
+        #             except Exception as e:
+        #                 logger.error(f"段落填充异常: {anchor_id} - {str(e)}")
+        #         else:
+        #             logger.warning(f"LLM返回了不存在的段落锚点ID: {anchor_id}")
+        # else:
+        #     logger.info("正文段落中未发现填空位")
 
         # --- 2. 处理表格 ---
         for table_idx, table in enumerate(self.doc.tables):
@@ -741,6 +742,24 @@ class AutoTable:
                                     filled_via_smart = True
                             
                             if not filled_via_smart:
+                                # 准备填充的值
+                                clean_val = str(value).strip()
+                                
+                                # === Label 保护逻辑 ===
+                                # 检查原文本是否包含 Label（以冒号结尾的前缀）
+                                # 常见 Label 格式： "Label：" 或 "Label:"
+                                # 且 Label 长度不应过长（例如不超过 10 个字符）
+                                label_match = re.match(r'^([^:：]{1,10}[:：])', original_text)
+                                if label_match:
+                                    label_prefix = label_match.group(1)
+                                    # 如果新值没有以这个 Label 开头，则补上
+                                    # 避免重复：如果 LLM 返回了 "Label: value"，就不需要补
+                                    if not clean_val.startswith(label_prefix):
+                                         # 特殊情况：如果原文本是 "起始：   年   月"，而新文本是 "2021年9月"
+                                         # 我们希望变成 "起始：2021年9月"
+                                         clean_val = label_prefix + clean_val
+                                         logger.info(f"锚点 {anchor_id}: 触发Label保护，已自动补全前缀 '{label_prefix}'")
+
                                 if cell.paragraphs:
                                     # 获取第一段
                                     first_para = cell.paragraphs[0]
@@ -766,15 +785,40 @@ class AutoTable:
                                     # 注意：first_para.clear() 会清除所有runs，但保留段落样式
                                     first_para.clear()
                                     
+                                    # --- Fix: 清除后续段落，防止多段落单元格出现内容残留 ---
+                                    # 如果是全量替换模式，且新内容包含了换行，或者我们认为这是在替换整个单元格
+                                    # 那么应该移除 cell.paragraphs[1:]
+                                    # 注意：在遍历列表时删除元素是危险的，应倒序删除
+                                    if len(cell.paragraphs) > 1:
+                                        for i in range(len(cell.paragraphs) - 1, 0, -1):
+                                            p_to_remove = cell.paragraphs[i]
+                                            # python-docx 没有直接的 delete_paragraph 方法
+                                            # 需要操作 XML 元素
+                                            try:
+                                                p_element = p_to_remove._element
+                                                p_element.getparent().remove(p_element)
+                                            except Exception as e:
+                                                logger.warning(f"清除残留段落失败: {e}")
+
                                     # 添加新内容
-                                    new_run = first_para.add_run(str(value))
+                                    # 如果 clean_val 包含换行符，add_run 不会自动换行，通常需要处理
+                                    # 但这里我们可以简单地让 add_run 处理文本，或者手动分割段落
+                                    # 如果 LLM 返回的内容确实包含换行，通常意味着它想表达多行结构
+                                    # 简单处理：将 \n 替换为 python-docx 的换行符，或者分割 add_run
+                                    # 不过 python-docx 的 run.text = "A\nB" 会被正确渲染为软回车还是？
+                                    # 通常 docx 中段落间换行是真回车，run 内 \n 是软回车 (Wait, docx text usually doesn't handle \n as paragraph break well in runs)
+                                    # 但为了保持一致性，如果之前是多段落，现在 LLM 返回单字符串带 \n，
+                                    # 最好还是作为单段落内的软回车，或者重建段落结构。
+                                    # 鉴于我们保留了 first_para，我们就在 first_para 里塞入内容。
+                                    
+                                    new_run = first_para.add_run(clean_val)
                                     
                                     # 应用字体样式
                                     if font_style:
                                         self._apply_run_style(new_run, font_style)
                                 else:
                                     # 确保值为字符串
-                                    cell.text = str(value)
+                                    cell.text = clean_val
                             
                         filled_count += 1
                         logger.debug(f"表格锚点 {anchor_id} 已填充值: {value}")

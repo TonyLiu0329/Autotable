@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import json
 import logging
 import tempfile
 import shutil
@@ -238,8 +239,6 @@ def main():
         st.session_state.kb_file_data = None # {'name': str, 'data': bytes}
     if 'processed_file' not in st.session_state:
         st.session_state.processed_file = None 
-    if 'extracted_file' not in st.session_state:
-        st.session_state.extracted_file = None
         
     setup_logging()
 
@@ -265,6 +264,7 @@ def main():
         st.divider()
         local_ip = get_local_ip()
         st.success(f"📡 局域网访问地址：\n**http://{local_ip}:8501**")
+        
         
         st.markdown("---")
         with st.expander("📖 使用指南", expanded=False):
@@ -408,9 +408,14 @@ def main():
                                                 st.stop()
                                             final_kb_path = json_kb_path
                                             
-                                            # 保存提取结果供下载
-                                            with open(final_kb_path, "rb") as f:
-                                                st.session_state.extracted_file = ("extracted_knowledge.json", f.read())
+                                            # 实时显示提取的 JSON 数据
+                                            try:
+                                                with open(final_kb_path, "r", encoding="utf-8") as f:
+                                                    json_data = json.load(f)
+                                                    st.markdown("### 📄 提取到的数据")
+                                                    st.json(json_data, expanded=False)
+                                            except Exception as e:
+                                                st.warning(f"无法显示中间数据: {e}")
 
                                     # 5. 运行 AutoTable
                                     temp_output_dir = os.path.join(temp_dir, "output")
@@ -449,15 +454,6 @@ def main():
                         type="primary",
                         use_container_width=True
                     )
-                    if st.session_state.extracted_file:
-                        ex_fname, ex_data = st.session_state.extracted_file
-                        st.download_button(
-                            label="⬇️ 下载中间提取数据 (JSON)",
-                            data=ex_data,
-                            file_name=ex_fname,
-                            mime="application/json",
-                            use_container_width=True
-                        )
 
     # --- 底部历史记录 (始终显示) ---
     st.markdown("---")

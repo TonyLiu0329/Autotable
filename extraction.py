@@ -48,55 +48,89 @@ def extract_content_to_json(docx_path, output_json_path, llm_client):
                 if row_text:
                     full_text.append(row_text)
         
-        doc_content = "\n".join(full_text)
+        def _split_chunks(lines, max_chars=8000):
+            chunks = []
+            buf = []
+            length = 0
+            for line in lines:
+                s = line if isinstance(line, str) else str(line)
+                if length + len(s) + 1 > max_chars and buf:
+                    chunks.append("\n".join(buf))
+                    buf = []
+                    length = 0
+                buf.append(s)
+                length += len(s) + 1
+            if buf:
+                chunks.append("\n".join(buf))
+            return chunks
 
-        # 2. 调用 LLM 进行结构化提取
-        prompt = f"""
-        请分析以下文档内容，提取所有信息，将其整理为**扁平化的 JSON 键值对**。
-        
-        文档内容：
-        {doc_content}
-        
-        要求：
-        1. **区分事实与段落**：
-           - 对于**短事实**（如姓名、电话、时间），请进行**细粒度拆分**。
-             例如：“张三，男，1990年出生” -> {{"姓名": "张三", "性别": "男", "出生年份": "1990"}}
-           - 对于**长段落/描述性内容**（如“成果简介”、“主要解决的教学问题”、“工作描述”），请**完整保留原话**，不要拆分，也不要过度总结。
-             例如：{{"成果简介": "21世纪是创新创业的世纪...（保留完整段落）"}}
-        2. **处理列表**：对于“主要贡献”、“奖励情况”等列表性内容，建议保留为带序号的完整文本，或拆分为 {{"奖励_1": "...", "奖励_2": "..."}}。
-        3. **标准化键名**：键名请尽量简洁、规范，但对于特定的小标题（如“成果简介”），直接使用原标题作为键名。
-        4. **不要遗漏**：请提取文档中的所有有效信息，包括页眉页脚中的联系方式。
-        5. **格式还原**：文档中如果出现 ' // '，表示原文的换行符。在生成的 JSON 值中，请将其还原为标准的换行符（\\n）或保留合理的段落结构。
-        
-        请直接返回 JSON 对象，不要包含 Markdown 格式标记或其他废话。
-        """
-
-        messages = [
-            {"role": "system", "content": "你是一个专业的数据提取专家，擅长将非结构化文档转化为结构化数据。"},
-            {"role": "user", "content": prompt}
-        ]
-
-        response = llm_client.chat_completion(messages, temperature=0.1)
-        
-        # 清洗 JSON
-        try:
-            # 尝试找到第一个 { 和最后一个 }
-            start = response.find('{')
-            end = response.rfind('}') + 1
-            if start != -1 and end != -1:
-                json_str = response[start:end]
-                data = json.loads(json_str)
-            else:
+        def _parse_json(text):
+            try:
+                start = text.find('{')
+                end = text.rfind('}') + 1
+                if start != -1 and end != -1:
+                    return json.loads(text[start:end])
                 raise ValueError("未找到JSON内容")
-        except Exception as e:
-            logger.error(f"LLM 返回的 JSON 解析失败: {response}")
-            # 兜底：如果解析失败，把原始内容存进去
-            data = {"Raw_Content": doc_content, "Error": "JSON解析失败"}
+            except Exception:
+                raise
 
-        # 3. 保存为 JSON 文件
-        with open(output_json_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
+        def _merge(a, b):
+            for k, v in b.items():
+                if k not in a:
+                    a[k] = v
+                else:
+                    av = a[k]
+                    if isinstance(av, dict) and isinstance(v, dict):
+                        _merge(av, v)
+                    elif isinstance(av, list):
+                        if isinstance(v, list):
+                            a[k] = av + [x for x in v]
+                        else:
+                            a[k] = av + [v]
+                    else:
+                        if av == v:
+                            a[k] = av
+                        else:
+                            a[k] = [av, v] if not isinstance(av, list) else av + [v]
+            return a
+
+        chunks = _split_chunks(full_text)
+        total = len(chunks)
+        merged = {}
+        raw_fallback = {}
+
+        for idx, chunk in enumerate(chunks, start=1):
+            prompt = f"""
+            请分析以下文档内容片段（第{idx}/{total}段），将其提取为扁平化 JSON 键值对。
             
+            文档内容片段：
+            {chunk}
+            
+            要求：
+            1. 区分短事实与长段落，短事实细粒度拆分，长段落保留原文。
+            2. 列表类内容可保留为序号文本或拆分为键_1、键_2。
+            3. 键名简洁规范，特定小标题直接用原标题。
+            4. 处理 ' // ' 作为换行提示，合理还原。
+            5. 仅返回 JSON 对象。
+            """
+            messages = [
+                {"role": "system", "content": "你是一个专业的数据提取专家，擅长将非结构化文档转化为结构化数据。"},
+                {"role": "user", "content": prompt}
+            ]
+            try:
+                response = llm_client.chat_completion(messages, temperature=0.1)
+                data = _parse_json(response)
+                merged = _merge(merged, data)
+            except Exception as e:
+                raw_fallback[f"Raw_Content_Chunk_{idx}"] = chunk
+                raw_fallback[f"Error_Chunk_{idx}"] = str(e)
+
+        final_data = merged if merged else {"Raw_Content": "\n".join(full_text), "Error": "JSON解析失败"}
+        if raw_fallback:
+            final_data.update(raw_fallback)
+
+        with open(output_json_path, 'w', encoding='utf-8') as f:
+            json.dump(final_data, f, ensure_ascii=False, indent=4)
         logger.info(f"成功使用 LLM 提取数据到 {output_json_path}")
         return True
 
